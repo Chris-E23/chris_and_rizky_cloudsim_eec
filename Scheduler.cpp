@@ -6,9 +6,11 @@
 //
 
 #include "Scheduler.hpp"
+#include <map>
 
 static bool migrating = false;
 static unsigned active_machines = 16;
+
 
 void Scheduler::Init() {
     // Find the parameters of the clusters
@@ -19,16 +21,27 @@ void Scheduler::Init() {
     //      Get the number of CPUs
     //      Get if there is a GPU or not
     // 
+
+    
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
-    for(unsigned i = 0; i < active_machines; i++)
-        vms.push_back(VM_Create(LINUX, X86));
-    for(unsigned i = 0; i < active_machines; i++) {
+    unsigned total_machines = Machine_GetTotal();
+    for(unsigned i = 0; i < total_machines; i++) {
         machines.push_back(MachineId_t(i));
     }    
+    for(unsigned i = 0; i < total_machines; i++){
+        MachineInfo_t curr_machine = Machine_GetInfo(i);
+
+        vms.push_back(VM_Create(LINUX, curr_machine.cpu));
+    
+    }
+    
+  
     for(unsigned i = 0; i < active_machines; i++) {
         VM_Attach(vms[i], machines[i]);
-    }
+        MachineInfo_t curr_machine = Machine_GetInfo(i);
+        curr_machine.vms.push_back(vms[i]);
+    } 
 
     bool dynamic = false;
     if(dynamic)
@@ -36,14 +49,13 @@ void Scheduler::Init() {
             for(unsigned j = 0; j < 8; j++)
                 Machine_SetCorePerformance(MachineId_t(0), j, P3);
     else{
-        SimOutput("All machines will be put on the default lowest P state", 3);
+        SimOutput("All machines will be put on the default lowest P state (P0)", 3);
     }
     // Turn off the ARM machines
     // for(unsigned i = 24; i < Machine_GetTotal(); i++)
     //     Machine_SetState(MachineId_t(i), S5);
 
     SimOutput("Scheduler::Init(): VM ids are " + to_string(vms[0]) + " ahd " + to_string(vms[1]), 3);
-
 
 
 }
@@ -79,36 +91,31 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     //This task will have to be assigned to a machine, but we make it negative one 
     //in the case that there is no compatible machine. If there is none, then we 
     //can handle it in the end
-
+    GreedyScheduler(vms, task_id);
    
     
     
 }
 
-void GreedySchedule(vector<int> vms, TaskId_t task_id){
+void Scheduler::GreedyScheduler(vector<VMId_t>vms, TaskId_t task_id){
     bool GPUCapable = IsTaskGPUCapable(task_id);
 
     TaskInfo_t new_task_info = GetTaskInfo(task_id);
     SLAType_t curr_sla = new_task_info.required_sla;
     CPUType_t req_cpu = new_task_info.required_cpu;
     unsigned required_memory = new_task_info.required_memory;
-    int best_machine = -1;
+  
     float best_util = 100.0;
 
-    //Try finding the best VM to put the task on first, 
-    for(int vm_id = 0; vm_id < vms.size(); vm_id++){
-        
-    }
-
-
-    for(int machine_id = 0; machine_id < active_machines; machine_id++){
+    MachineId_t best_machine = 0;
+    for(MachineId_t machine_id = 0; machine_id < active_machines; machine_id++){
         //Assign tasks based on the info at hand 
         //Choose machines with least number of tasks and most memory available
 
         MachineInfo_t curr_machine_info = Machine_GetInfo(machine_id);
         float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
         // Approximate that the number of tasks correspond to number of active cpus active 
-        float memory_util = curr_machine_info.memory_used / curr_machine_info.memory_size;
+        float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
 
         float curr_util = max(cpu_util, memory_util);
         if(GPUCapable && !curr_machine_info.gpus){
@@ -134,6 +141,9 @@ void GreedySchedule(vector<int> vms, TaskId_t task_id){
         }
       
     }
+    MachineInfo_t best = Machine_GetInfo(best_machine);
+    VMId_t new_vm = VM_Create(new_task_info.required_vm, new_task_info.required_cpu);
+    VM_Attach(new_vm, best_machine);
 
 }
 
@@ -204,10 +214,7 @@ void SchedulerCheck(Time_t time) {
     Scheduler.PeriodicCheck(time);
     static unsigned counts = 0;
     counts++;
-    if(counts == 10) {
-        migrating = true;
-        VM_Migrate(1, 9);
-    }
+
 }
 
 void SimulationComplete(Time_t time) {

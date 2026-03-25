@@ -10,6 +10,7 @@
 
 #include <iostream>
 #include <vector>
+#include <cstdint>
 
 using namespace std;
 
@@ -102,6 +103,7 @@ typedef struct {
     MachineState_t s_state;                 // The current S state of the machine
     CPUPerformance_t p_state;               // The current P state of the CPUs (all CPUs are set to the same P state to simplify scheduling
     MachineId_t machine_id;                 // The identifier of the machine
+    vector<VMId_t> vms;                     // The list of vms associated with this machine
 } MachineInfo_t;
 
 typedef struct {
@@ -113,9 +115,7 @@ typedef struct {
     Time_t completion;
     Time_t target_completion;
     bool gpu_capable;
-    
     Priority_t priority;
-    
     CPUType_t required_cpu;
     unsigned required_memory;
     SLAType_t required_sla;
