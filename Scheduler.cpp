@@ -35,15 +35,23 @@ void Scheduler::Init() {
         for(unsigned i = 0; i<4 ; i++)
             for(unsigned j = 0; j < 8; j++)
                 Machine_SetCorePerformance(MachineId_t(0), j, P3);
+    else{
+        SimOutput("All machines will be put on the default lowest P state", 3);
+    }
     // Turn off the ARM machines
-    for(unsigned i = 24; i < Machine_GetTotal(); i++)
-        Machine_SetState(MachineId_t(i), S5);
+    // for(unsigned i = 24; i < Machine_GetTotal(); i++)
+    //     Machine_SetState(MachineId_t(i), S5);
 
     SimOutput("Scheduler::Init(): VM ids are " + to_string(vms[0]) + " ahd " + to_string(vms[1]), 3);
+
+
+
 }
 
 void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     // Update your data structure. The VM now can receive new tasks
+
+
 }
 
 void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
@@ -64,13 +72,69 @@ void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
     // Turn on a machine, migrate an existing VM from a loaded machine....
     //
     // Other possibilities as desired
-    Priority_t priority = (task_id == 0 || task_id == 64)? HIGH_PRIORITY : MID_PRIORITY;
-    if(migrating) {
-        VM_AddTask(vms[0], task_id, priority);
+    // Skeleton code, you need to change it according to your algorithm
+
+    //Greedy Algorithm 
+    
+    //This task will have to be assigned to a machine, but we make it negative one 
+    //in the case that there is no compatible machine. If there is none, then we 
+    //can handle it in the end
+
+   
+    
+    
+}
+
+void GreedySchedule(vector<int> vms, TaskId_t task_id){
+    bool GPUCapable = IsTaskGPUCapable(task_id);
+
+    TaskInfo_t new_task_info = GetTaskInfo(task_id);
+    SLAType_t curr_sla = new_task_info.required_sla;
+    CPUType_t req_cpu = new_task_info.required_cpu;
+    unsigned required_memory = new_task_info.required_memory;
+    int best_machine = -1;
+    float best_util = 100.0;
+
+    //Try finding the best VM to put the task on first, 
+    for(int vm_id = 0; vm_id < vms.size(); vm_id++){
+        
     }
-    else {
-        VM_AddTask(vms[task_id % active_machines], task_id, priority);
-    }// Skeleton code, you need to change it according to your algorithm
+
+
+    for(int machine_id = 0; machine_id < active_machines; machine_id++){
+        //Assign tasks based on the info at hand 
+        //Choose machines with least number of tasks and most memory available
+
+        MachineInfo_t curr_machine_info = Machine_GetInfo(machine_id);
+        float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
+        // Approximate that the number of tasks correspond to number of active cpus active 
+        float memory_util = curr_machine_info.memory_used / curr_machine_info.memory_size;
+
+        float curr_util = max(cpu_util, memory_util);
+        if(GPUCapable && !curr_machine_info.gpus){
+            continue;
+        }
+        if(curr_machine_info.cpu != req_cpu){
+            continue;
+        }   
+        unsigned remaining_memory = curr_machine_info.memory_size - curr_machine_info.memory_used;
+        if(remaining_memory < required_memory){
+            continue;
+        }
+        if(best_machine == -1){
+            //At this point, we know that the current machine is compatible, so let's set it as the
+            // base 
+            best_machine = machine_id;
+        }
+
+        if(best_util > curr_util){
+            best_util = curr_util;
+            best_machine = machine_id;
+
+        }
+      
+    }
+
 }
 
 void Scheduler::PeriodicCheck(Time_t now) {
@@ -78,6 +142,8 @@ void Scheduler::PeriodicCheck(Time_t now) {
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
     // Recommendation: Take advantage of this function to do some monitoring and adjustments as necessary
+
+
 }
 
 void Scheduler::Shutdown(Time_t time) {
@@ -106,11 +172,13 @@ static Scheduler Scheduler;
 void InitScheduler() {
     SimOutput("InitScheduler(): Initializing scheduler", 4);
     Scheduler.Init();
+
 }
 
 void HandleNewTask(Time_t time, TaskId_t task_id) {
     SimOutput("HandleNewTask(): Received new task " + to_string(task_id) + " at time " + to_string(time), 4);
     Scheduler.NewTask(time, task_id);
+
 }
 
 void HandleTaskCompletion(Time_t time, TaskId_t task_id) {
@@ -156,10 +224,16 @@ void SimulationComplete(Time_t time) {
 }
 
 void SLAWarning(Time_t time, TaskId_t task_id) {
+    // Activate more machines?
     
+
+
 }
 
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
     // Called in response to an earlier request to change the state of a machine
+   
+
 }
+
 

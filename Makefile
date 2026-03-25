@@ -31,4 +31,4 @@ $(TARGET): $(OBJ)
 
 # Clean up build files
 clean:
-	rm -f $(OBJ) $(TARGET)
+	rm -f simulator
