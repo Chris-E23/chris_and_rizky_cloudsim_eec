@@ -105,7 +105,9 @@ void Scheduler::GreedyScheduler(vector<VMId_t>vms, TaskId_t task_id){
     float best_util = std::numeric_limits<float>::max();
 
     MachineId_t best_machine = -1;
-    
+    float best_cpu_util = std::numeric_limits<float>::max(); 
+    MachineId_t best_cpu_machine = -1; 
+
     for(MachineId_t machine_id = 0; machine_id < total_machines; machine_id++){
         //Assign tasks based on the info at hand 
         //Choose machines with least number of tasks and most memory available
@@ -114,8 +116,13 @@ void Scheduler::GreedyScheduler(vector<VMId_t>vms, TaskId_t task_id){
         float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
         // Approximate that the number of tasks correspond to number of active cpus active 
         float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
-
+        
         float curr_util = max(cpu_util, memory_util);
+        if(best_cpu_util > cpu_util)
+        {
+            best_cpu_util = cpu_util; 
+            best_cpu_machine = machine_id; 
+        }
         if(GPUCapable && !curr_machine_info.gpus){
             continue;
         }
@@ -141,6 +148,7 @@ void Scheduler::GreedyScheduler(vector<VMId_t>vms, TaskId_t task_id){
     }
     if(best_machine == -1){
           printf("Best machine not found! All machines being used at capacity!\n");
+          best_machine = best_cpu_machine;
     }
 
     MachineInfo_t best = Machine_GetInfo(best_machine);
@@ -156,7 +164,7 @@ void Scheduler::PeriodicCheck(Time_t now) {
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
     // Recommendation: Take advantage of this function to do some monitoring and adjustments as necessary
-
+    
 
 }
 
@@ -245,7 +253,7 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
     // Activate more machines?
     TaskInfo_t task_info = GetTaskInfo(task_id);
     if(task_info.completion > task_info.target_completion){
-
+        SimOutput("SLAWarning! Task " + to_string(task_id) + " will not complete in time!", 3);
 
     }
 
@@ -254,7 +262,7 @@ void SLAWarning(Time_t time, TaskId_t task_id) {
 
 void StateChangeComplete(Time_t time, MachineId_t machine_id) {
     // Called in response to an earlier request to change the state of a machine
-   
+    
 
 }
 
