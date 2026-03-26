@@ -179,15 +179,7 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 4);
     
     VMId_t current_vm = tasks_and_vms[task_id];
-    VM_RemoveTask(current_vm, task_id);
-    /*Might be strenous, consider doing this in schedulercheck. 
-    */
-    for(int i = 0; i < vms.size(); i++){
-        VMInfo_t current_vm = VM_GetInfo(vms[i]);
-        if(current_vm.active_tasks.size() == 0){
-            VM_Shutdown(vms[i]);
-        }
-    }
+   
    
 
 
