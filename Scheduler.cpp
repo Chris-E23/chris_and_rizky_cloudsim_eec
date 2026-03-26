@@ -7,10 +7,11 @@
 
 #include "Scheduler.hpp"
 #include <map>
-
+#include <limits>
 static bool migrating = false;
-static unsigned active_machines = 16;
-
+static unsigned total_machines = 16;
+map<MachineId_t, vector<VMId_t>> machine_and_vms;
+map<TaskId_t, VMId_t> tasks_and_vms;
 
 void Scheduler::Init() {
     // Find the parameters of the clusters
@@ -23,39 +24,35 @@ void Scheduler::Init() {
     // 
 
     
+    
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
-    unsigned total_machines = Machine_GetTotal();
+    total_machines = Machine_GetTotal();
     for(unsigned i = 0; i < total_machines; i++) {
         machines.push_back(MachineId_t(i));
     }    
     for(unsigned i = 0; i < total_machines; i++){
         MachineInfo_t curr_machine = Machine_GetInfo(i);
-
         vms.push_back(VM_Create(LINUX, curr_machine.cpu));
-    
+        VM_Attach(vms[i], machines[i]);
+        machine_and_vms[i].push_back(vms[i]);
     }
     
-  
-    for(unsigned i = 0; i < active_machines; i++) {
-        VM_Attach(vms[i], machines[i]);
-        MachineInfo_t curr_machine = Machine_GetInfo(i);
-        curr_machine.vms.push_back(vms[i]);
-    } 
+
+
 
     bool dynamic = false;
     if(dynamic)
         for(unsigned i = 0; i<4 ; i++)
             for(unsigned j = 0; j < 8; j++)
                 Machine_SetCorePerformance(MachineId_t(0), j, P3);
-    else{
-        SimOutput("All machines will be put on the default lowest P state (P0)", 3);
-    }
-    // Turn off the ARM machines
-    // for(unsigned i = 24; i < Machine_GetTotal(); i++)
-    //     Machine_SetState(MachineId_t(i), S5);
+    
 
-    SimOutput("Scheduler::Init(): VM ids are " + to_string(vms[0]) + " ahd " + to_string(vms[1]), 3);
+   
+  
+
+    SimOutput("Scheduler::Init(): VM ids are " + to_string(vms[0]) + " and " + to_string(vms[1]), 3);
+
 
 
 }
@@ -105,13 +102,14 @@ void Scheduler::GreedyScheduler(vector<VMId_t>vms, TaskId_t task_id){
     CPUType_t req_cpu = new_task_info.required_cpu;
     unsigned required_memory = new_task_info.required_memory;
   
-    float best_util = 100.0;
+    float best_util = std::numeric_limits<float>::max();
 
-    MachineId_t best_machine = 0;
-    for(MachineId_t machine_id = 0; machine_id < active_machines; machine_id++){
+    MachineId_t best_machine = -1;
+    
+    for(MachineId_t machine_id = 0; machine_id < total_machines; machine_id++){
         //Assign tasks based on the info at hand 
         //Choose machines with least number of tasks and most memory available
-
+  
         MachineInfo_t curr_machine_info = Machine_GetInfo(machine_id);
         float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
         // Approximate that the number of tasks correspond to number of active cpus active 
@@ -141,10 +139,16 @@ void Scheduler::GreedyScheduler(vector<VMId_t>vms, TaskId_t task_id){
         }
       
     }
+    if(best_machine == -1){
+          printf("Best machine not found! All machines being used at capacity!\n");
+    }
+
     MachineInfo_t best = Machine_GetInfo(best_machine);
     VMId_t new_vm = VM_Create(new_task_info.required_vm, new_task_info.required_cpu);
+    machine_and_vms[best_machine].push_back(new_vm);
     VM_Attach(new_vm, best_machine);
-
+    VM_AddTask(new_vm, task_id, new_task_info.priority);
+    tasks_and_vms[task_id] = new_vm;
 }
 
 void Scheduler::PeriodicCheck(Time_t now) {
@@ -173,6 +177,21 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
     // This is an opportunity to make any adjustments to optimize performance/energy
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 4);
+    
+    VMId_t current_vm = tasks_and_vms[task_id];
+    VM_RemoveTask(current_vm, task_id);
+    /*Might be strenous, consider doing this in schedulercheck. 
+    */
+    for(int i = 0; i < vms.size(); i++){
+        VMInfo_t current_vm = VM_GetInfo(vms[i]);
+        if(current_vm.active_tasks.size() == 0){
+            VM_Shutdown(vms[i]);
+        }
+    }
+   
+
+
+
 }
 
 // Public interface below
@@ -232,7 +251,11 @@ void SimulationComplete(Time_t time) {
 
 void SLAWarning(Time_t time, TaskId_t task_id) {
     // Activate more machines?
-    
+    TaskInfo_t task_info = GetTaskInfo(task_id);
+    if(task_info.completion > task_info.target_completion){
+
+
+    }
 
 
 }
