@@ -13,7 +13,8 @@ static unsigned total_machines = 16;
 map<MachineId_t, vector<VMId_t>> machine_and_vms;
 map<TaskId_t, VMId_t> tasks_and_vms;
 
-void Scheduler::Init() {
+
+void GreedyScheduler::Init() {
     // Find the parameters of the clusters
     // Get the total number of machines
     // For each machine:
@@ -57,44 +58,19 @@ void Scheduler::Init() {
 
 }
 
-void Scheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
+void GreedyScheduler::MigrationComplete(Time_t time, VMId_t vm_id) {
     // Update your data structure. The VM now can receive new tasks
 
 
 }
 
-void Scheduler::NewTask(Time_t now, TaskId_t task_id) {
-    // Get the task parameters
-    //  IsGPUCapable(task_id);
-    //  GetMemory(task_id);
-    //  RequiredVMType(task_id);
-    //  RequiredSLA(task_id);
-    //  RequiredCPUType(task_id);
-    // Decide to attach the task to an existing VM, 
-    //      vm.AddTask(taskid, Priority_T priority); or
-    // Create a new VM, attach the VM to a machine
-    //      VM vm(type of the VM)
-    //      vm.Attach(machine_id);
-    //      vm.AddTask(taskid, Priority_t priority) or
-    // Turn on a machine, create a new VM, attach it to the VM, then add the task
-    //
-    // Turn on a machine, migrate an existing VM from a loaded machine....
-    //
-    // Other possibilities as desired
-    // Skeleton code, you need to change it according to your algorithm
-
+void GreedyScheduler::NewTask(Time_t now, TaskId_t task_id) {
     //Greedy Algorithm 
     
     //This task will have to be assigned to a machine, but we make it negative one 
     //in the case that there is no compatible machine. If there is none, then we 
     //can handle it in the end
-    GreedyScheduler(vms, task_id);
-   
-    
-    
-}
 
-void Scheduler::GreedyScheduler(vector<VMId_t>vms, TaskId_t task_id){
     bool GPUCapable = IsTaskGPUCapable(task_id);
 
     TaskInfo_t new_task_info = GetTaskInfo(task_id);
@@ -157,18 +133,25 @@ void Scheduler::GreedyScheduler(vector<VMId_t>vms, TaskId_t task_id){
     VM_Attach(new_vm, best_machine);
     VM_AddTask(new_vm, task_id, new_task_info.priority);
     tasks_and_vms[task_id] = new_vm;
+   
+    
+    
 }
 
-void Scheduler::PeriodicCheck(Time_t now) {
+
+void GreedyScheduler::PeriodicCheck(Time_t now) {
     // This method should be called from SchedulerCheck()
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
     // Recommendation: Take advantage of this function to do some monitoring and adjustments as necessary
     
+    for(MachineId_t i = 0; i < total_machines; i++){
+        SimOutput("Current Energy Usage of Machine " + to_string(i) + ": " + to_string(Machine_GetEnergy(i)), 0);
+    }
 
 }
 
-void Scheduler::Shutdown(Time_t time) {
+void GreedyScheduler::Shutdown(Time_t time) {
     // Do your final reporting and bookkeeping here.
     // Report about the total energy consumed
     // Report about the SLA compliance
@@ -180,7 +163,7 @@ void Scheduler::Shutdown(Time_t time) {
     SimOutput("SimulationComplete(): Time is " + to_string(time), 4);
 }
 
-void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
+void GreedyScheduler::TaskComplete(Time_t now, TaskId_t task_id) {
     // Do any bookkeeping necessary for the data structures
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
     // This is an opportunity to make any adjustments to optimize performance/energy
@@ -194,10 +177,18 @@ void Scheduler::TaskComplete(Time_t now, TaskId_t task_id) {
 
 }
 
+
+
+
+
+
+
+
+
 // Public interface below
 
-static Scheduler Scheduler;
-
+static GreedyScheduler Scheduler;
+static pMapper Scheduler2; 
 void InitScheduler() {
     SimOutput("InitScheduler(): Initializing scheduler", 4);
     Scheduler.Init();
