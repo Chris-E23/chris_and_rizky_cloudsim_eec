@@ -9,12 +9,14 @@ static map<MachineId_t, vector<VMId_t>> machine_and_vms;
 static map<TaskId_t, VMId_t> tasks_and_vms;
 static std::set<VMId_t> migrating_vms;
 map<MachineId_t, vector<TaskId_t>> machines_and_tasks; 
-
+static std::set<MachineId_t> online_machines;
+static std::set<MachineId_t> intermediate_machines;
+static std::set<MachineId_t> offline_machines;
 
 static unsigned total_machines = 16;
 
 const MachineId_t INVALID_MACHINE = std::numeric_limits<MachineId_t>::max();
-void pMapper::Init() {
+void MinMin::Init() {
     // Find the parameters of the clusters
     // Get the total number of machines
     // For each machine:
@@ -35,16 +37,13 @@ void pMapper::Init() {
         vms.push_back(VM_Create(LINUX, curr_machine.cpu));
         VM_Attach(vms[i], machines[i]);
         machine_and_vms[i].push_back(vms[i]);
+        offline_machines.insert(MachineId_t(i));
+       
+
     }
     
 
-
-
-    bool dynamic = false;
-    if(dynamic)
-        for(unsigned i = 0; i<4 ; i++)
-            for(unsigned j = 0; j < 8; j++)
-                Machine_SetCorePerformance(MachineId_t(0), j, P3);
+    
     
 
    
@@ -56,7 +55,7 @@ void pMapper::Init() {
 
 }
 
-void pMapper::MigrationComplete(Time_t time, VMId_t vm_id) {
+void MinMin::MigrationComplete(Time_t time, VMId_t vm_id) {
     // Update your data structure. The VM now can receive new tasks
     migrating_vms.erase(vm_id);
 
@@ -66,7 +65,7 @@ bool MachineEnergyComparison(MachineId_t a, MachineId_t b){
 
     return Machine_GetEnergy(a) < Machine_GetEnergy(b);
 }
-void pMapper::NewTask(Time_t now, TaskId_t task_id) {
+void MinMin::NewTask(Time_t now, TaskId_t task_id) {
     //pMapper algorithms, fills the current machine up before going on to the next one 
 
     bool GPUCapable = IsTaskGPUCapable(task_id);
@@ -81,7 +80,7 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id) {
     sort(sorted_list.begin(), sorted_list.end(), MachineEnergyComparison);
 
     vector<MachineId_t>::iterator it; 
-    MachineId_t curr_machine = INVALID_MACHINE;
+    MachineId_t curr_machine = -1;
     float best_cpu_util = std::numeric_limits<float>::max();
     MachineId_t best_cpu_machine = -1;
     for(it = sorted_list.begin(); it != sorted_list.end(); it++){
@@ -90,25 +89,25 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id) {
         // Approximate that the number of tasks correspond to number of active cpus active 
         float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
         unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
-       
-        if(curr_machine_info.s_state != S0) continue;
 
         if(curr_machine_info.cpu != req_cpu){
             continue;
         }   
-        
-        if(curr_machine == INVALID_MACHINE){
+        if(free_mem < required_memory){
+            continue; 
+        }
+        if(curr_machine == -1){
             curr_machine = *it;
             //To ensure something is assigned
         }
-        if(free_mem >= required_memory){
+        if(memory_util < 100){
             curr_machine = *it;
+            //The first machine that we find that is not fully utilized should be used
             break;
         }
 
     }
-   
-
+ 
     MachineInfo_t best = Machine_GetInfo(curr_machine);
     //Update the data structure
     machines_and_tasks[curr_machine].push_back(task_id);
@@ -118,6 +117,8 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id) {
         if(info.cpu == req_cpu){
             VM_AddTask(vm, task_id, new_task_info.priority);
             tasks_and_vms[task_id] = vm;   
+            machines_and_tasks[curr_machine].push_back(task_id);
+
             return;
         }
     }
@@ -132,7 +133,7 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id) {
 }
 
 
-void pMapper::PeriodicCheck(Time_t now) {
+void MinMin::PeriodicCheck(Time_t now) {
     // This method should be called from SchedulerCheck()
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
@@ -144,7 +145,7 @@ void pMapper::PeriodicCheck(Time_t now) {
 
 }
 
-void pMapper::Shutdown(Time_t time) {
+void MinMin::Shutdown(Time_t time) {
     // Do your final reporting and bookkeeping here.
     // Report about the total energy consumed
     // Report about the SLA compliance
@@ -156,7 +157,7 @@ void pMapper::Shutdown(Time_t time) {
     SimOutput("SimulationComplete(): Time is " + to_string(time), 4);
 }
 
-void pMapper::TaskComplete(Time_t now, TaskId_t task_id) {
+void MinMin::TaskComplete(Time_t now, TaskId_t task_id) {
 
     // Do any bookkeeping necessary for the data structures
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
@@ -193,13 +194,13 @@ void pMapper::TaskComplete(Time_t now, TaskId_t task_id) {
         float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
         // Approximate that the number of tasks correspond to number of active cpus active 
         float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
-        if(curr_machine_info.s_state != S0) continue;
+        
         float curr_util = max(cpu_util, memory_util);
         if(curr_machine_info.active_tasks == 0){
             //We are ensuring that the machine we choose has at least one task
             continue;
         }
-        
+        unsigned remaining_memory = curr_machine_info.memory_size - curr_machine_info.memory_used;
         if(best_machine == INVALID_MACHINE){
             //At this point, we know that the current machine is compatible, so let's set it as the
             //base 
@@ -248,12 +249,6 @@ void pMapper::TaskComplete(Time_t now, TaskId_t task_id) {
         MachineId_t target_machine = INVALID_MACHINE;
         float best_util = 0;
         //Go through the highest utilized machines and select one
-        long required_memory = 0;
-        for(int i = 0; i < new_vm_info.active_tasks.size(); i++){
-            TaskInfo_t temp = GetTaskInfo(new_vm_info.active_tasks[i]);
-
-            required_memory += temp.required_memory;
-        }
         for(MachineId_t machine_id = 0; machine_id < total_machines; machine_id++){
             
             MachineInfo_t curr_machine_info = Machine_GetInfo(machine_id);
@@ -263,21 +258,13 @@ void pMapper::TaskComplete(Time_t now, TaskId_t task_id) {
             long remaining_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
             float curr_util = max(cpu_util, memory_util);
         
-            if(curr_machine_info.s_state != S0) continue;
-            unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
-            if(machine_id == best_machine){
-                continue;
-            }
             if(curr_machine_info.cpu != req_cpu){
                 continue;
-            }   
-            if(free_mem < required_memory){
-                continue; 
-            }
-            
+            } 
+            if(curr_machine_info.s_state != S0) continue;
             if(target_machine == INVALID_MACHINE){
-                //At this point, we know that the current machine is compatible, so let's set it
-                //as the base 
+                //At this point, we know that the current machine is compatible, so let's set it as the
+                // base 
                 target_machine = machine_id;
             }
             if(best_util < curr_util){
@@ -290,7 +277,7 @@ void pMapper::TaskComplete(Time_t now, TaskId_t task_id) {
         }
 
 
-        if(target_machine != INVALID_MACHINE && !migrating_vms.count(best_vm_id)){
+        if(target_machine != INVALID_MACHINE && target_machine != best_machine && !migrating_vms.count(best_vm_id)){
             migrating_vms.insert(best_vm_id);
             
             MachineInfo_t temp = Machine_GetInfo(target_machine);
@@ -301,20 +288,11 @@ void pMapper::TaskComplete(Time_t now, TaskId_t task_id) {
             // printf("Target machine s state %d\n", temp.s_state);
             VM_Migrate(best_vm_id, target_machine);
         }
-
-        for (MachineId_t i = 0; i < total_machines; i++) {
-            MachineInfo_t info = Machine_GetInfo(i);
-            if(i == target_machine){
-                continue;
-            }
-            if (info.active_tasks == 0 && info.s_state == S0 && machine_and_vms[i].empty()) {
-                Machine_SetState(i, S5); // or S3 for sleep
-            }   
-    }
+        
 
     }
     
-   
+
 
    
     
