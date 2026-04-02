@@ -42,18 +42,17 @@ public:
 };
 
 class MinMin{
-
-public: 
-    MinMin() {};
-    void Init();
-    void MigrationComplete(Time_t time, VMId_t vm_id);
-    void NewTask(Time_t now, TaskId_t task_id);
-    void PeriodicCheck(Time_t now);
-    void Shutdown(Time_t now);
-    void TaskComplete(Time_t now, TaskId_t task_id);
-    private:
-        vector<VMId_t> vms;
-        vector<MachineId_t> machines;
-};
+    public: 
+        MinMin() {};
+        void Init();
+        void MigrationComplete(Time_t time, VMId_t vm_id);
+        void NewTask(Time_t now, TaskId_t task_id);
+        void PeriodicCheck(Time_t now);
+        void Shutdown(Time_t now);
+        void TaskComplete(Time_t now, TaskId_t task_id);
+        private:
+            vector<VMId_t> vms;
+            vector<MachineId_t> machines;
+    };
 
 #endif /* Scheduler_hpp */

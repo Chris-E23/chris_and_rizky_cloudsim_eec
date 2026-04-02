@@ -10,17 +10,15 @@
 #include "Scheduler.hpp"
 static bool migrating = false;
 
-
-
-
 // Public interface below
 
 // static GreedyScheduler Scheduler;
 static pMapper Scheduler; 
+// static MinMin Scheduler; 
 void InitScheduler() {
     SimOutput("InitScheduler(): Initializing scheduler", 4);
-    // Scheduler.Init();
     Scheduler.Init();
+
 }
 
 void HandleNewTask(Time_t time, TaskId_t task_id) {
@@ -36,7 +34,7 @@ void HandleTaskCompletion(Time_t time, TaskId_t task_id) {
 
 void MemoryWarning(Time_t time, MachineId_t machine_id) {
     // The simulator is alerting you that machine identified by machine_id is overcommitted
-    // SimOutput("MemoryWarning(): Overflow at " + to_string(machine_id) + " was detected at time " + to_string(time), 0);
+   SimOutput("MemoryWarning(): Overflow at " + to_string(machine_id) + " was detected at time " + to_string(time), 0);
 }
 
 void MigrationDone(Time_t time, VMId_t vm_id) {
@@ -70,11 +68,11 @@ void SimulationComplete(Time_t time) {
 
 void SLAWarning(Time_t time, TaskId_t task_id) {
     // Activate more machines?
-    TaskInfo_t task_info = GetTaskInfo(task_id);
-    if(task_info.completion > task_info.target_completion){
-        SimOutput("SLAWarning! Task " + to_string(task_id) + " will not complete in time!", 3);
+    // TaskInfo_t task_info = GetTaskInfo(task_id);
+    // if(task_info.completion > task_info.target_completion){
+    //     SimOutput("SLAWarning! Task " + to_string(task_id) + " will not complete in time!", 3);
 
-    }
+    // }
 
 
 }

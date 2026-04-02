@@ -5,18 +5,21 @@
 #include <vector>
 #include <algorithm>
 #include <bits/stdc++.h>
+#include <set>
+
 static map<MachineId_t, vector<VMId_t>> machine_and_vms;
 static map<TaskId_t, VMId_t> tasks_and_vms;
 static std::set<VMId_t> migrating_vms;
-map<MachineId_t, vector<TaskId_t>> machines_and_tasks; 
-static std::set<MachineId_t> online_machines;
-static std::set<MachineId_t> intermediate_machines;
-static std::set<MachineId_t> offline_machines;
-
+static map<MachineId_t, vector<TaskId_t>> machines_and_tasks;
+static vector<TaskId_t> task_queue;
+long prev_size = -1;
 static unsigned total_machines = 16;
 
 const MachineId_t INVALID_MACHINE = std::numeric_limits<MachineId_t>::max();
-void MinMin::Init() {
+const MachineId_t INVALID_TASK = std::numeric_limits<MachineId_t>::max();
+
+void MinMin::Init()
+{
     // Find the parameters of the clusters
     // Get the total number of machines
     // For each machine:
@@ -29,272 +32,295 @@ void MinMin::Init() {
     SimOutput("Scheduler::Init(): Total number of machines is " + to_string(Machine_GetTotal()), 3);
     SimOutput("Scheduler::Init(): Initializing scheduler", 1);
     total_machines = Machine_GetTotal();
-    for(unsigned i = 0; i < total_machines; i++) {
+    for (unsigned i = 0; i < total_machines; i++)
+    {
         machines.push_back(MachineId_t(i));
-    }    
-    for(unsigned i = 0; i < total_machines; i++){
+    }
+    for (unsigned i = 0; i < total_machines; i++)
+    {
         MachineInfo_t curr_machine = Machine_GetInfo(i);
         vms.push_back(VM_Create(LINUX, curr_machine.cpu));
         VM_Attach(vms[i], machines[i]);
         machine_and_vms[i].push_back(vms[i]);
-        offline_machines.insert(MachineId_t(i));
-       
-
     }
-    
 
-    
-    
-
-   
-  
-
-    SimOutput("pMapper Scheduler::Init(): VM ids are " + to_string(vms[0]) + " and " + to_string(vms[1]), 3);
-
-
-
+    SimOutput("MinMin Scheduler::Init(): VM ids are " + to_string(vms[0]) + " and " + to_string(vms[1]), 3);
 }
 
-void MinMin::MigrationComplete(Time_t time, VMId_t vm_id) {
+void MinMin::MigrationComplete(Time_t time, VMId_t vm_id)
+{
     // Update your data structure. The VM now can receive new tasks
     migrating_vms.erase(vm_id);
-
 }
-
-bool MachineEnergyComparison(MachineId_t a, MachineId_t b){
-
-    return Machine_GetEnergy(a) < Machine_GetEnergy(b);
+int slaPriority(SLAType_t sla) {
+     switch(sla) {
+        case SLA0: return 0;
+        case SLA1: return 1;
+        case SLA2: return 2;
+        case SLA3: return 3;
+        default:   return 4;
+    }
 }
-void MinMin::NewTask(Time_t now, TaskId_t task_id) {
-    //pMapper algorithms, fills the current machine up before going on to the next one 
-
-    bool GPUCapable = IsTaskGPUCapable(task_id);
-
-    TaskInfo_t new_task_info = GetTaskInfo(task_id);
-    SLAType_t curr_sla = new_task_info.required_sla;
-    CPUType_t req_cpu = new_task_info.required_cpu;
-    unsigned required_memory = new_task_info.required_memory;
-    vector<MachineId_t> sorted_list;
-    //Sorted
-    std::copy(machines.begin(), machines.end(), std::back_inserter(sorted_list));
-    sort(sorted_list.begin(), sorted_list.end(), MachineEnergyComparison);
-
-    vector<MachineId_t>::iterator it; 
-    MachineId_t curr_machine = -1;
-    float best_cpu_util = std::numeric_limits<float>::max();
-    MachineId_t best_cpu_machine = -1;
-    for(it = sorted_list.begin(); it != sorted_list.end(); it++){
-        MachineInfo_t curr_machine_info = Machine_GetInfo(*it);
-        float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
-        // Approximate that the number of tasks correspond to number of active cpus active 
-        float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
-        unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
-
-        if(curr_machine_info.cpu != req_cpu){
-            continue;
-        }   
-        if(free_mem < required_memory){
-            continue; 
-        }
-        if(curr_machine == -1){
-            curr_machine = *it;
-            //To ensure something is assigned
-        }
-        if(memory_util < 100){
-            curr_machine = *it;
-            //The first machine that we find that is not fully utilized should be used
-            break;
-        }
-
-    }
- 
-    MachineInfo_t best = Machine_GetInfo(curr_machine);
-    //Update the data structure
-    machines_and_tasks[curr_machine].push_back(task_id);
-    for(auto vm : machine_and_vms[curr_machine]){
-        VMInfo_t info = VM_GetInfo(vm);
-        if(migrating_vms.count(vm)) continue;
-        if(info.cpu == req_cpu){
-            VM_AddTask(vm, task_id, new_task_info.priority);
-            tasks_and_vms[task_id] = vm;   
-            machines_and_tasks[curr_machine].push_back(task_id);
-
-            return;
-        }
-    }
-    VMId_t new_vm = VM_Create(new_task_info.required_vm, new_task_info.required_cpu);
-    machine_and_vms[curr_machine].push_back(new_vm);
-    VM_Attach(new_vm, curr_machine);
-    VM_AddTask(new_vm, task_id, new_task_info.priority);
-    tasks_and_vms[task_id] = new_vm;
    
 
-    
+void MinMin::NewTask(Time_t now, TaskId_t task_id)
+{
+
+    //Calculate the least amount of work with different configurations
+    task_queue.push_back(task_id);
+
+    if (task_queue.size() > 15)
+    {
+        set<MachineId_t> used_machines;
+        map<TaskId_t, map<MachineId_t, float>> task_machine_time;
+
+        while (task_queue.size())
+        {
+            TaskId_t curr = task_queue.back();
+            TaskInfo_t curr_task_info = GetTaskInfo(curr);
+            task_queue.pop_back();
+            
+            for (MachineId_t machine_id = 0; machine_id < total_machines; machine_id++)
+            {
+                MachineInfo_t curr_machine_info = Machine_GetInfo(machine_id);
+                if (curr_machine_info.s_state != S0)
+                {
+                    continue;
+                }
+
+                if (curr_machine_info.cpu != curr_task_info.required_cpu)
+                {
+                    continue;
+                }
+
+                unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
+                if (free_mem < curr_task_info.required_memory)
+                {
+                    continue;
+                }
+                task_machine_time[curr][machine_id] = (float)curr_task_info.remaining_instructions /
+                                                      (float)curr_machine_info.performance[0];
+            }
+        }
+        map<TaskId_t, map<MachineId_t, float>>::iterator map_it;
+        // Go through the map while it's still alive. Each time, find the lowest
+        // time and choose that to minimize the total time
+        while (task_machine_time.size())
+        {
+            float best_time = std::numeric_limits<float>::max();
+            MachineId_t best_machine = INVALID_MACHINE;
+            TaskId_t best_task = INVALID_TASK;
+            int best_sla_priority = std::numeric_limits<int>::max();
+            
+            for (map_it = task_machine_time.begin(); map_it != task_machine_time.end(); map_it++)
+            {
+                map<MachineId_t, float>::iterator machine_it;
+                TaskInfo_t curr_task = GetTaskInfo(map_it->first);
+                int curr_sla_priority = slaPriority(curr_task.required_sla);
+                for (machine_it = map_it->second.begin(); machine_it != map_it->second.end(); machine_it++)
+                {
+                    if (curr_sla_priority < best_sla_priority ||
+                    (curr_sla_priority == best_sla_priority && machine_it->second < best_time))
+                    {
+                        best_time = machine_it->second;
+                        best_machine = machine_it->first;
+                        best_task = map_it->first;
+                        best_sla_priority = curr_sla_priority;
+                    }
+                    
+                }
+            }
+            if (best_machine == INVALID_MACHINE)
+                break;
+
+            TaskInfo_t best_task_info = GetTaskInfo(best_task);
+            machines_and_tasks[best_machine].push_back(best_task);
+            bool found = false;
+            for (auto vm : machine_and_vms[best_machine])
+            {
+                if (migrating_vms.count(vm))
+                    continue;
+
+                VMInfo_t info = VM_GetInfo(vm);
+                if (info.cpu == best_task_info.required_cpu)
+                {
+                    VM_AddTask(vm, best_task, best_task_info.priority);
+                    tasks_and_vms[best_task] = vm;
+                    // Return as soon as we find a suitable vm
+                    found = true;
+                }
+            }
+            // If we could not find a suitable vm, then make a vm
+            if (!found)
+            {
+                VMId_t new_vm = VM_Create(best_task_info.required_vm, best_task_info.required_cpu);
+                machine_and_vms[best_machine].push_back(new_vm);
+                VM_Attach(new_vm, best_machine);
+                VM_AddTask(new_vm, best_task, best_task_info.priority);
+                tasks_and_vms[best_task] = new_vm;
+            }
+
+            // Remove the task from consideration since we just dealt with it
+            task_machine_time.erase(best_task);
+            for (map_it = task_machine_time.begin(); map_it != task_machine_time.end(); map_it++)
+            {
+                map<MachineId_t, float>::iterator machine_it;
+
+                for (machine_it = map_it->second.begin(); machine_it != map_it->second.end(); machine_it++)
+                { // Add all the times to the machines
+                    if(machine_it->first == best_machine){
+                        machine_it->second += best_time;
+                    }
+                    
+                }
+            }
+        }
+    }
 }
 
-
-void MinMin::PeriodicCheck(Time_t now) {
+void MinMin::PeriodicCheck(Time_t now)
+{
     // This method should be called from SchedulerCheck()
     // SchedulerCheck is called periodically by the simulator to allow you to monitor, make decisions, adjustments, etc.
     // Unlike the other invocations of the scheduler, this one doesn't report any specific event
     // Recommendation: Take advantage of this function to do some monitoring and adjustments as necessary
-    
-    // for(MachineId_t i = 0; i < total_machines; i++){
-    //     SimOutput("Current Energy Usage of Machine " + to_string(i) + ": " + to_string(Machine_GetEnergy(i)), 0);
-    // }
 
+    // for (MachineId_t i = 0; i < total_machines; i++)
+    // {
+    //     // SimOutput("Current Energy Usage of Machine " + to_string(i) + ": " + to_string(Machine_GetEnergy(i)), 0);
+    //     printf("Current task count of machine : %lu\n", i, machines_and_tasks[i].size());
+    // }
+    
+    if (task_queue.size() > 0 && prev_size == task_queue.size())
+    {
+       set<MachineId_t> used_machines;
+        map<TaskId_t, map<MachineId_t, float>> task_machine_time;
+
+        while (task_queue.size())
+        {
+            TaskId_t curr = task_queue.back();
+            TaskInfo_t curr_task_info = GetTaskInfo(curr);
+            task_queue.pop_back();
+            
+            for (MachineId_t machine_id = 0; machine_id < total_machines; machine_id++)
+            {
+                MachineInfo_t curr_machine_info = Machine_GetInfo(machine_id);
+                if (curr_machine_info.s_state != S0)
+                {
+                    continue;
+                }
+
+                if (curr_machine_info.cpu != curr_task_info.required_cpu)
+                {
+                    continue;
+                }
+
+                unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
+                if (free_mem < curr_task_info.required_memory)
+                {
+                    continue;
+                }
+                task_machine_time[curr][machine_id] = (float)curr_task_info.remaining_instructions /
+                                                      (float)curr_machine_info.performance[0];
+            }
+        }
+        map<TaskId_t, map<MachineId_t, float>>::iterator map_it;
+        // Go through the map while it's still alive. Each time, find the lowest
+        // time and choose that to minimize the total time
+        while (task_machine_time.size())
+        {
+            float best_time = std::numeric_limits<float>::max();
+            MachineId_t best_machine = INVALID_MACHINE;
+            TaskId_t best_task = INVALID_TASK;
+            int best_sla_priority = std::numeric_limits<int>::max();
+            
+            for (map_it = task_machine_time.begin(); map_it != task_machine_time.end(); map_it++)
+            {
+                map<MachineId_t, float>::iterator machine_it;
+                TaskInfo_t curr_task = GetTaskInfo(map_it->first);
+                int curr_sla_priority = slaPriority(curr_task.required_sla);
+                for (machine_it = map_it->second.begin(); machine_it != map_it->second.end(); machine_it++)
+                {
+                    if (curr_sla_priority < best_sla_priority ||
+               (curr_sla_priority == best_sla_priority && machine_it->second < best_time))
+                {
+                    best_time = machine_it->second;
+                    best_machine = machine_it->first;
+                    best_task = map_it->first;
+                    best_sla_priority = curr_sla_priority;
+                }
+                }
+            }
+            if (best_machine == INVALID_MACHINE)
+                break;
+
+            TaskInfo_t best_task_info = GetTaskInfo(best_task);
+            machines_and_tasks[best_machine].push_back(best_task);
+            // printf("Best machine: %lu\n", best_machine);
+            // printf("Best task: %lu\n", best_task);
+            bool found = false;
+            for (auto vm : machine_and_vms[best_machine])
+            {
+                if (migrating_vms.count(vm))
+                    continue;
+
+                VMInfo_t info = VM_GetInfo(vm);
+                if (info.cpu == best_task_info.required_cpu)
+                {
+                    VM_AddTask(vm, best_task, best_task_info.priority);
+                    tasks_and_vms[best_task] = vm;
+                    // Return as soon as we find a suitable vm
+                    found = true;
+                }
+            }
+            // If we could not find a suitable vm, then make a vm
+            if (!found)
+            {
+                VMId_t new_vm = VM_Create(best_task_info.required_vm, best_task_info.required_cpu);
+                machine_and_vms[best_machine].push_back(new_vm);
+                VM_Attach(new_vm, best_machine);
+                VM_AddTask(new_vm, best_task, best_task_info.priority);
+                tasks_and_vms[best_task] = new_vm;
+            }
+
+            // Remove the task from consideration since we just dealt with it
+            task_machine_time.erase(best_task);
+            for (map_it = task_machine_time.begin(); map_it != task_machine_time.end(); map_it++)
+            {
+                map<MachineId_t, float>::iterator machine_it;
+
+                for (machine_it = map_it->second.begin(); machine_it != map_it->second.end(); machine_it++)
+                { // Add all the times to the machines
+                    if(machine_it->first == best_machine){
+                        machine_it->second += best_time;
+                    }
+                    
+                }
+            }
+        } 
+    }
+    prev_size = task_queue.size();
 }
 
-void MinMin::Shutdown(Time_t time) {
+void MinMin::Shutdown(Time_t time)
+{
     // Do your final reporting and bookkeeping here.
     // Report about the total energy consumed
     // Report about the SLA compliance
     // Shutdown everything to be tidy :-)
-    for(auto & vm: vms) {
+    for (auto &vm : vms)
+    {
         VM_Shutdown(vm);
     }
     SimOutput("SimulationComplete(): Finished!", 4);
     SimOutput("SimulationComplete(): Time is " + to_string(time), 4);
 }
 
-void MinMin::TaskComplete(Time_t now, TaskId_t task_id) {
+void MinMin::TaskComplete(Time_t now, TaskId_t task_id)
+{
 
     // Do any bookkeeping necessary for the data structures
     // Decide if a machine is to be turned off, slowed down, or VMs to be migrated according to your policy
     // This is an opportunity to make any adjustments to optimize performance/energy
     SimOutput("Scheduler::TaskComplete(): Task " + to_string(task_id) + " is complete at " + to_string(now), 4);
-    MachineId_t curr_machine = VM_GetInfo(tasks_and_vms[task_id]).machine_id;
-    vector<TaskId_t> curr_tasks = machines_and_tasks[curr_machine];
-    //Remove the current task from the data structure
-    int ind = -1;
-    for(int i = 0; i < curr_tasks.size(); i++){
-        if(curr_tasks[i] == task_id){
-            ind = i;
-        }
-    }
-    if(ind != -1){
-    machines_and_tasks[curr_machine].erase(machines_and_tasks[curr_machine].begin() + ind);
-
-    }
-    tasks_and_vms[task_id] = NULL;
-    
-
-  
-    float best_util = std::numeric_limits<float>::max();
-
-    MachineId_t best_machine = INVALID_MACHINE;
-    float best_cpu_util = std::numeric_limits<float>::max(); 
-    MachineId_t best_cpu_machine = INVALID_MACHINE; 
-    
-    //Go through all machines to find the least utilized machine
-    for(MachineId_t machine_id = 0; machine_id < total_machines; machine_id++){
-        
-  
-        MachineInfo_t curr_machine_info = Machine_GetInfo(machine_id);
-        float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
-        // Approximate that the number of tasks correspond to number of active cpus active 
-        float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
-        
-        float curr_util = max(cpu_util, memory_util);
-        if(curr_machine_info.active_tasks == 0){
-            //We are ensuring that the machine we choose has at least one task
-            continue;
-        }
-        unsigned remaining_memory = curr_machine_info.memory_size - curr_machine_info.memory_used;
-        if(best_machine == INVALID_MACHINE){
-            //At this point, we know that the current machine is compatible, so let's set it as the
-            //base 
-            best_machine = machine_id;
-        }
-        if(best_util > curr_util){
-            best_util = curr_util;
-            best_machine = machine_id;
-
-        }
-       
-        
-      
-    }
-    
-    if(best_machine != INVALID_MACHINE){ // This means we found a machine who's workload we can transfer
-        vector<VMId_t> curr_vms = machine_and_vms[best_machine];
-        
-        int best_vm_ind = 0;
-        long best_instr_count = std::numeric_limits<long>::max();
-        //Find the lowest utilized vm on that machine
-        for(int i = 0; i < curr_vms.size(); i++){
-            VMInfo_t curr_vm = VM_GetInfo(curr_vms[i]);
-            VMInfo_t best_curr_vm = VM_GetInfo(curr_vms[best_vm_ind]);
-            vector<TaskId_t> curr_tasks = curr_vm.active_tasks;
-            long curr_instr_count = 0;
-            for(int j = 0; j < curr_tasks.size(); j++){
-                //Sum up amount of instructions in the current_vm
-                TaskInfo_t curr_task = GetTaskInfo(curr_tasks[j]);
-                curr_instr_count += curr_task.remaining_instructions;
-            }
-            if(best_instr_count > curr_instr_count){
-                best_instr_count = curr_instr_count;
-                best_vm_ind = i;
-            }
-
-
-        }
-        //Remove the VM from this machine
-        VMId_t best_vm_id = curr_vms[best_vm_ind];
-
-        //We only want to migrate the workload to a more highly utilized server 
-        //if it's compatible, otherwise, just keep it on the current machine 
-        VMInfo_t new_vm_info = VM_GetInfo(best_vm_id);
-        CPUType_t req_cpu = new_vm_info.cpu;
-        MachineId_t target_machine = INVALID_MACHINE;
-        float best_util = 0;
-        //Go through the highest utilized machines and select one
-        for(MachineId_t machine_id = 0; machine_id < total_machines; machine_id++){
-            
-            MachineInfo_t curr_machine_info = Machine_GetInfo(machine_id);
-            float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
-            // Approximate that the number of tasks correspond to number of active cpus active 
-            float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
-            long remaining_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
-            float curr_util = max(cpu_util, memory_util);
-        
-            if(curr_machine_info.cpu != req_cpu){
-                continue;
-            } 
-            if(curr_machine_info.s_state != S0) continue;
-            if(target_machine == INVALID_MACHINE){
-                //At this point, we know that the current machine is compatible, so let's set it as the
-                // base 
-                target_machine = machine_id;
-            }
-            if(best_util < curr_util){
-                best_util = curr_util;
-                target_machine = machine_id;
-                
-
-            }
-      
-        }
-
-
-        if(target_machine != INVALID_MACHINE && target_machine != best_machine && !migrating_vms.count(best_vm_id)){
-            migrating_vms.insert(best_vm_id);
-            
-            MachineInfo_t temp = Machine_GetInfo(target_machine);
-            // printf("Target Machine ID: %d\n", target_machine);
-            // printf("Best Machine ID: %d\n", best_machine);
-            // printf("Best VM ID: %d\n", best_vm_id);
-        
-            // printf("Target machine s state %d\n", temp.s_state);
-            VM_Migrate(best_vm_id, target_machine);
-        }
-        
-
-    }
-    
-
-
-   
-    
-  
 }
