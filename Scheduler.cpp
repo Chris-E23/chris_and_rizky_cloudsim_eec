@@ -14,8 +14,8 @@ static bool migrating = false;
 
 // static GreedyScheduler Scheduler;
 // static pMapper Scheduler; 
-static MinMin Scheduler;
-// static RoundRobin Scheduler; 
+// static MinMin Scheduler;
+static RoundRobin Scheduler; 
 void InitScheduler() {
     SimOutput("InitScheduler(): Initializing scheduler", 4);
     Scheduler.Init();
