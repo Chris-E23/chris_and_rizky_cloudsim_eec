@@ -12,9 +12,9 @@ static bool migrating = false;
 
 // Public interface below
 
-// static GreedyScheduler Scheduler;
+static GreedyScheduler Scheduler;
 // static pMapper Scheduler; 
-static MinMin Scheduler;
+// static MinMin Scheduler;
 // static RoundRobin Scheduler; 
 void InitScheduler() {
     SimOutput("InitScheduler(): Initializing scheduler", 4);
