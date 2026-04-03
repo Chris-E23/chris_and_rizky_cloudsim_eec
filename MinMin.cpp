@@ -17,7 +17,7 @@ static unsigned total_machines = 16;
 long prev_count = 0;
 const MachineId_t INVALID_MACHINE = std::numeric_limits<MachineId_t>::max();
 const MachineId_t INVALID_TASK = std::numeric_limits<MachineId_t>::max();
-
+std::set<MachineId_t> sleeping_machines;
 void MinMin::Init()
 {
     // Find the parameters of the clusters
@@ -73,7 +73,10 @@ void MinMin::NewTask(Time_t now, TaskId_t task_id)
     // Calculate the least amount of work with different configurations
     task_queue.push_back(task_id);
     TaskInfo_t task_info = GetTaskInfo(task_id);
-
+    //  if (task_info.required_sla == SLA0) {
+    //     ScheduleBatch();  // schedule immediately
+    //     return;
+    // }
     if (task_queue.size() < 20)
         return; // wait for a full batch
 
@@ -89,7 +92,6 @@ void MinMin::ScheduleBatch()
     map<MachineId_t, float> reserved_time;
 
     map<TaskId_t, map<MachineId_t, float>> ect;
-    vector<TaskId_t> unschedulable;
 
     for (TaskId_t taskid : task_queue)
     {
@@ -107,24 +109,24 @@ void MinMin::ScheduleBatch()
                     continue;
                 if (mi.memory_size - mi.memory_used < ti.required_memory)
                     continue;
-                if (ti.required_sla == SLA0 && cpu_util > 1*factor)
-                {
+                if (ti.required_sla == SLA0 && cpu_util > 2 * factor)
                     continue;
-                }
-                if (ti.required_sla == SLA1 && cpu_util > 1.3*factor)
-                {
+                if (ti.required_sla == SLA1 && cpu_util > 4 * factor)
                     continue;
-                }
-                ect[taskid][machineid] = (float)ti.remaining_instructions / (float)mi.performance[0];
+
                 float base = (float)ti.remaining_instructions / (float)mi.performance[0];
-                ect[taskid][machineid] = base + reserved_time[machineid];
+
+                // Penalize loaded machines: a machine at 2x utilization takes ~2x longer
+                // Clamp to avoid exploding scores on transiently busy machines
+                float load_penalty = max(1.0f, cpu_util);
+
+                ect[taskid][machineid] = base * load_penalty + reserved_time[machineid];
             }
 
-            factor+=2;
-            
+            factor += 1;
         }
     }
-    
+
     task_queue.clear();
 
     while (!ect.empty())
@@ -138,12 +140,14 @@ void MinMin::ScheduleBatch()
         {
             int sla = slaPriority(GetTaskInfo(tid).required_sla);
             TaskInfo_t curr_task = GetTaskInfo(tid);
+            float best_util = std::numeric_limits<float>::max();
             for (auto &[mid, t] : ms)
             {
                 MachineInfo_t curr_machine = Machine_GetInfo(mid);
-              
+
                 // If there isn't any memory remaining, then don't use the machine
-                if(curr_machine.memory_size - curr_machine.memory_used < curr_task.required_memory){
+                if (curr_machine.memory_size - curr_machine.memory_used < curr_task.required_memory)
+                {
                     continue;
                 }
                 if (sla < best_sla || (sla == best_sla && t < best_time))
@@ -216,8 +220,6 @@ void MinMin::ScheduleBatch()
             }
         }
     }
-
-    task_queue.insert(task_queue.end(), unschedulable.begin(), unschedulable.end());
 }
 
 void MinMin::PeriodicCheck(Time_t now)
@@ -271,18 +273,5 @@ void MinMin::TaskComplete(Time_t now, TaskId_t task_id)
     tasklist.erase(std::remove(tasklist.begin(), tasklist.end(), task_id),
                    tasklist.end());
 
-    // Power down machine if idle  ← fix: energy management
-    // if (tasklist.empty()) {
-    // // Check no VMs on this machine are still active
-    // bool safe_to_shutdown = true;
-    // for (auto vm : machine_and_vms[mid]) {
-    //     VMInfo_t vinfo = VM_GetInfo(vm);
-    //     if (!vinfo.active_tasks.empty() || migrating_vms.count(vm)) {
-    //         safe_to_shutdown = false;
-    //         break;
-    //     }
-    // }
-    // if (safe_to_shutdown)
-    //     Machine_SetState(mid, S5);
-    // }
+    // Check no VMs on this machine are still active
 }
