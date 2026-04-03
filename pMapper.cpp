@@ -53,7 +53,9 @@ void pMapper::MigrationComplete(Time_t time, VMId_t vm_id)
     // Update your data structure. The VM now can receive new tasks
     migrating_vms.erase(vm_id);
 }
-
+static float MachineMIPS(MachineId_t mid) {
+    return (float)Machine_GetInfo(mid).performance[0]; // P0 = max MIPS
+}
 MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
 {
 
@@ -63,6 +65,11 @@ MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
     vector<MachineId_t>::iterator it;
     unsigned required_memory = task_info.required_memory;
     float best_util = std::numeric_limits<float>::max();
+    float max_mips = 0;
+
+    for (MachineId_t mid = 0; mid < total_machines; mid++)
+            max_mips = max(max_mips, MachineMIPS(mid));
+    
     for (it = list.begin(); it != list.end(); it++)
     {
         MachineInfo_t curr_machine_info = Machine_GetInfo(*it);
@@ -71,6 +78,7 @@ MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
         float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
         unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
         float curr_util = max(memory_util, cpu_util);
+        
         if (curr_machine_info.s_state != S0)
             continue;
 
@@ -82,6 +90,8 @@ MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
         {
             continue;
         }
+        if (task_info.required_sla == SLA0 && MachineMIPS(*it) < max_mips * 0.9f)        continue;
+
         if (best_util > curr_util)
         {
             curr_machine = *it;
@@ -106,7 +116,7 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id)
     MachineId_t curr_machine = INVALID_MACHINE;
     float best_cpu_util = std::numeric_limits<float>::max();
     MachineId_t best_cpu_machine = INVALID_MACHINE;
-    float factor = 1.0;
+
     if (sleeping_machines.size() == total_machines)
     {
         // Mass wake up to avoid no machines working

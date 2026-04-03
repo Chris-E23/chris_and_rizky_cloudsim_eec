@@ -74,12 +74,6 @@ void MinMin::NewTask(Time_t now, TaskId_t task_id)
     task_queue.push_back(task_id);
     TaskInfo_t task_info = GetTaskInfo(task_id);
 
-    // if (task_info.required_sla != SLA0)
-    // {
-    //     ScheduleBatch();
-    //     return;
-    // }
-
     if (task_queue.size() < 20)
         return; // wait for a full batch
 
@@ -99,21 +93,38 @@ void MinMin::ScheduleBatch()
 
     for (TaskId_t taskid : task_queue)
     {
-        TaskInfo_t ti = GetTaskInfo(taskid);
-        for (MachineId_t machineid = 0; machineid < total_machines; machineid++)
+        float factor = 1.0;
+        while (ect[taskid].size() == 0)
         {
-            MachineInfo_t mi = Machine_GetInfo(machineid);
-            if (mi.s_state != S0)
-                continue;
-            if (mi.cpu != ti.required_cpu)
-                continue;
-            if (mi.memory_size - mi.memory_used < ti.required_memory)
-                continue;
-            ect[taskid][machineid] = (float)ti.remaining_instructions / (float)mi.performance[0];
-            float base = (float)ti.remaining_instructions / (float)mi.performance[0];
-            ect[taskid][machineid] = base + reserved_time[machineid];
+            TaskInfo_t ti = GetTaskInfo(taskid);
+            for (MachineId_t machineid = 0; machineid < total_machines; machineid++)
+            {
+                MachineInfo_t mi = Machine_GetInfo(machineid);
+                float cpu_util = (float)mi.active_tasks / float(mi.num_cpus);
+                if (mi.s_state != S0)
+                    continue;
+                if (mi.cpu != ti.required_cpu)
+                    continue;
+                if (mi.memory_size - mi.memory_used < ti.required_memory)
+                    continue;
+                if (ti.required_sla == SLA0 && cpu_util > 1*factor)
+                {
+                    continue;
+                }
+                if (ti.required_sla == SLA1 && cpu_util > 1.3*factor)
+                {
+                    continue;
+                }
+                ect[taskid][machineid] = (float)ti.remaining_instructions / (float)mi.performance[0];
+                float base = (float)ti.remaining_instructions / (float)mi.performance[0];
+                ect[taskid][machineid] = base + reserved_time[machineid];
+            }
+
+            factor+=2;
+            
         }
     }
+    
     task_queue.clear();
 
     while (!ect.empty())
@@ -121,21 +132,20 @@ void MinMin::ScheduleBatch()
         float best_time = std::numeric_limits<float>::max();
         MachineId_t best_machine = INVALID_MACHINE;
         TaskId_t best_task = INVALID_TASK;
-        int best_sla = std::numeric_limits<int>::max();
+        uint64_t best_sla = std::numeric_limits<int>::max();
         // Find the best SLA and the best time
         for (auto &[tid, ms] : ect)
         {
             int sla = slaPriority(GetTaskInfo(tid).required_sla);
+            TaskInfo_t curr_task = GetTaskInfo(tid);
             for (auto &[mid, t] : ms)
             {
                 MachineInfo_t curr_machine = Machine_GetInfo(mid);
-                TaskInfo_t curr_task = GetTaskInfo(tid);
+              
                 // If there isn't any memory remaining, then don't use the machine
-                if (curr_machine.memory_size - curr_machine.memory_used < curr_task.required_memory)
-                {
+                if(curr_machine.memory_size - curr_machine.memory_used < curr_task.required_memory){
                     continue;
                 }
-
                 if (sla < best_sla || (sla == best_sla && t < best_time))
                 {
                     best_time = t;
@@ -153,10 +163,9 @@ void MinMin::ScheduleBatch()
             for (auto &[tid, ms] : ect)
             {
                 int sla = slaPriority(GetTaskInfo(tid).required_sla);
-                
+                uint64_t best_energy = std::numeric_limits<uint64_t>::max();
                 for (auto &[mid, t] : ms)
                 {
-
                     if (sla < best_sla || (sla == best_sla && t < best_time))
                     {
                         best_time = t;
@@ -196,16 +205,15 @@ void MinMin::ScheduleBatch()
         }
 
         ect.erase(best_task);
-        //Update the time across machines
+        // Update the time across machines
         for (auto &[tid, ms] : ect)
         {
-           for(auto&[machine, time] : ms){
+            for (auto &[machine, time] : ms)
+            {
                 MachineInfo_t mi = Machine_GetInfo(machine);
                 float base = (float)GetTaskInfo(tid).remaining_instructions / mi.performance[0];
-                ms[machine] = base + reserved_time[machine]; 
-           }
-               
-            
+                ms[machine] = base + reserved_time[machine];
+            }
         }
     }
 
