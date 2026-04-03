@@ -46,12 +46,60 @@ void RoundRobin::Init()
 
     SimOutput("Round Robin Scheduler::Init(): VM ids are " + to_string(vms[0]) + " and " + to_string(vms[1]), 3);
 }
-
+static float MachineMIPS(MachineId_t mid)
+{
+    return (float)Machine_GetInfo(mid).performance[0]; // P0 = max MIPS
+}
 void RoundRobin::MigrationComplete(Time_t time, VMId_t vm_id)
 {
     // Update your data structure. The VM now can receive new tasks
 }
+static MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
+{
 
+    MachineId_t curr_machine = INVALID_MACHINE;
+    TaskInfo_t task_info = GetTaskInfo(task_id);
+    CPUType_t req_cpu = task_info.required_cpu;
+    vector<MachineId_t>::iterator it;
+    unsigned required_memory = task_info.required_memory;
+    float best_util = std::numeric_limits<float>::max();
+    float max_mips = 0;
+
+    for (MachineId_t mid = 0; mid < total_machines; mid++)
+        max_mips = max(max_mips, MachineMIPS(mid));
+
+    for (it = list.begin(); it != list.end(); it++)
+    {
+        MachineInfo_t curr_machine_info = Machine_GetInfo(*it);
+        float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
+        // Approximate that the number of tasks correspond to number of active cpus active
+        float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
+        unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
+        float curr_util = max(memory_util, cpu_util);
+
+        if (curr_machine_info.s_state != S0)
+            continue;
+
+        if (curr_machine_info.cpu != req_cpu)
+        {
+            continue;
+        }
+        if (free_mem < required_memory)
+        {
+            continue;
+        }
+        if (task_info.required_sla == SLA0 && MachineMIPS(*it) < max_mips * 0.8f)
+            continue;
+        if (task_info.required_sla == SLA1 && MachineMIPS(*it) < max_mips * 0.5f)
+            continue;
+        if (best_util > curr_util)
+        {
+            curr_machine = *it;
+            best_util = cpu_util;
+        }
+    }
+    return curr_machine;
+}
 void RoundRobin::NewTask(Time_t now, TaskId_t task_id)
 {
     // RoundRobin algorithms, fills the current machine up before going on to the next one
@@ -64,25 +112,34 @@ void RoundRobin::NewTask(Time_t now, TaskId_t task_id)
 
     MachineId_t best_machine = INVALID_MACHINE;
     MachineId_t best_cpu_machine = INVALID_MACHINE;
-  
 
     MachineId_t curr_machine = INVALID_MACHINE;
     vector<MachineId_t> available_machines = cputypes_and_machines[req_cpu];
-
-    int &idx = rr_index[req_cpu];
-    idx++;
-    for (int i = 0; i < available_machines.size(); i++)
+    float max_mips = 0;
+    for (MachineId_t mid = 0; mid < total_machines; mid++)
+        max_mips = max(max_mips, MachineMIPS(mid));
+    if (curr_sla == SLA0 || curr_sla == SLA1)
     {
-        MachineId_t mid = available_machines[(idx + i) % available_machines.size()];
-        MachineInfo_t info = Machine_GetInfo(mid);
-
-        if (info.s_state != S0)
-            continue;
-
-        if (info.memory_size - info.memory_used < required_memory)
-            continue;
-        curr_machine = mid; 
+        curr_machine = findLowestUtilization(task_id, available_machines);
     }
+    if (curr_machine == INVALID_MACHINE)
+    {
+        int &idx = rr_index[req_cpu];
+        idx++;
+        for (int i = 0; i < available_machines.size(); i++)
+        {
+            MachineId_t mid = available_machines[(idx + i) % available_machines.size()];
+            MachineInfo_t info = Machine_GetInfo(mid);
+
+            if (info.s_state != S0)
+                continue;
+
+            if (info.memory_size - info.memory_used < required_memory)
+                continue;
+            curr_machine = mid;
+        }
+    }
+
     for (auto vm : machine_and_vms[curr_machine])
     {
         VMInfo_t info = VM_GetInfo(vm);
@@ -146,5 +203,4 @@ void RoundRobin::TaskComplete(Time_t now, TaskId_t task_id)
     MachineId_t curr_machine = VM_GetInfo(tasks_and_vms[task_id]).machine_id;
     // Remove the current task from the data structure
     RemoveTask(task_id, curr_machine);
-
 }

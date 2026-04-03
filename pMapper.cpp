@@ -56,7 +56,7 @@ void pMapper::MigrationComplete(Time_t time, VMId_t vm_id)
 static float MachineMIPS(MachineId_t mid) {
     return (float)Machine_GetInfo(mid).performance[0]; // P0 = max MIPS
 }
-MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
+static MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
 {
 
     MachineId_t curr_machine = INVALID_MACHINE;
@@ -90,7 +90,8 @@ MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
         {
             continue;
         }
-        if (task_info.required_sla == SLA0 && MachineMIPS(*it) < max_mips * 0.9f)        continue;
+        if (task_info.required_sla == SLA0 && MachineMIPS(*it) < max_mips * 0.8f)      
+          continue;
 
         if (best_util > curr_util)
         {
@@ -161,7 +162,7 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id)
             {
                 continue;
             }
-            if (new_task_info.required_sla == SLA2 && cpu_util > 1)
+            if (new_task_info.required_sla == SLA2 && cpu_util > 10)
             {
                 continue;
             }
