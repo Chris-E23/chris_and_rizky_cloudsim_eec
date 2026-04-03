@@ -6,7 +6,7 @@ CXXFLAGS = -Wall -std=c++17
 INCLUDES = -I.
 
 # Source files
-SRC = Init.cpp Machine.cpp main.cpp Scheduler.cpp Simulator.cpp Task.cpp VM.cpp pMapper.cpp GreedyScheduler.cpp MinMin.cpp
+SRC = Init.cpp Machine.cpp main.cpp Scheduler.cpp Simulator.cpp Task.cpp VM.cpp pMapper.cpp GreedyScheduler.cpp MinMin.cpp RoundRobin.cpp 
 
 # Object files
 OBJ = $(SRC:.cpp=.o)

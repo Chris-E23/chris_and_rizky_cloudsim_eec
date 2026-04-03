@@ -13,8 +13,9 @@ static bool migrating = false;
 // Public interface below
 
 // static GreedyScheduler Scheduler;
-static pMapper Scheduler; 
-// static MinMin Scheduler; 
+// static pMapper Scheduler; 
+static MinMin Scheduler;
+// static RoundRobin Scheduler; 
 void InitScheduler() {
     SimOutput("InitScheduler(): Initializing scheduler", 4);
     Scheduler.Init();
@@ -68,11 +69,11 @@ void SimulationComplete(Time_t time) {
 
 void SLAWarning(Time_t time, TaskId_t task_id) {
     // Activate more machines?
-    // TaskInfo_t task_info = GetTaskInfo(task_id);
-    // if(task_info.completion > task_info.target_completion){
-    //     SimOutput("SLAWarning! Task " + to_string(task_id) + " will not complete in time!", 3);
+    TaskInfo_t task_info = GetTaskInfo(task_id);
+    if(task_info.completion > task_info.target_completion){
+        SimOutput("SLAWarning! Task " + to_string(task_id) + " will not complete in time!", 3);
 
-    // }
+    }
 
 
 }

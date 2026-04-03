@@ -6,7 +6,7 @@ static unsigned total_machines = 16;
 static map<MachineId_t, vector<VMId_t>> machine_and_vms;
 static map<TaskId_t, VMId_t> tasks_and_vms;
 const MachineId_t INVALID_MACHINE = std::numeric_limits<MachineId_t>::max();
-
+static map<MachineId_t, vector<TaskId_t>> machines_and_tasks;
 
 void GreedyScheduler::Init() {
     // Find the parameters of the clusters
@@ -107,13 +107,26 @@ void GreedyScheduler::NewTask(Time_t now, TaskId_t task_id) {
           printf("Best machine not found! All machines being used at capacity!\n");
           
     }
+    
+    machines_and_tasks[best_machine].push_back(task_id);
 
+    for (auto vm : machine_and_vms[best_machine])
+    {
+        VMInfo_t info = VM_GetInfo(vm);
+        if (info.cpu == req_cpu)
+        {
+            VM_AddTask(vm, task_id, new_task_info.priority);
+            tasks_and_vms[task_id] = vm;
+            return;
+        }
+    }
     MachineInfo_t best = Machine_GetInfo(best_machine);
     VMId_t new_vm = VM_Create(new_task_info.required_vm, new_task_info.required_cpu);
     machine_and_vms[best_machine].push_back(new_vm);
     VM_Attach(new_vm, best_machine);
     VM_AddTask(new_vm, task_id, new_task_info.priority);
     tasks_and_vms[task_id] = new_vm;
+    
    
     
     
