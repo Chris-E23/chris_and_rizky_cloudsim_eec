@@ -13,10 +13,15 @@ static std::set<MachineId_t> sleeping_machines;
 static unsigned total_machines = 16;
 vector<MachineId_t> sorted_list;
 const MachineId_t INVALID_MACHINE = std::numeric_limits<MachineId_t>::max();
+static float max_mips = 0;
 bool MachineEnergyComparison(MachineId_t a, MachineId_t b)
 {
 
     return Machine_GetEnergy(a) < Machine_GetEnergy(b);
+}
+static float MachineMIPS(MachineId_t mid)
+{
+    return (float)Machine_GetInfo(mid).performance[0]; // P0 = max MIPS
 }
 void pMapper::Init()
 {
@@ -46,6 +51,9 @@ void pMapper::Init()
     std::copy(machines.begin(), machines.end(), std::back_inserter(sorted_list));
     sort(sorted_list.begin(), sorted_list.end(), MachineEnergyComparison);
     SimOutput("pMapper Scheduler::Init(): VM ids are " + to_string(vms[0]) + " and " + to_string(vms[1]), 3);
+
+    for (MachineId_t mid = 0; mid < total_machines; mid++)
+        max_mips = max(max_mips, MachineMIPS(mid));
 }
 
 void pMapper::MigrationComplete(Time_t time, VMId_t vm_id)
@@ -53,9 +61,7 @@ void pMapper::MigrationComplete(Time_t time, VMId_t vm_id)
     // Update your data structure. The VM now can receive new tasks
     migrating_vms.erase(vm_id);
 }
-static float MachineMIPS(MachineId_t mid) {
-    return (float)Machine_GetInfo(mid).performance[0]; // P0 = max MIPS
-}
+
 static MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> list)
 {
 
@@ -63,13 +69,10 @@ static MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> l
     TaskInfo_t task_info = GetTaskInfo(task_id);
     CPUType_t req_cpu = task_info.required_cpu;
     vector<MachineId_t>::iterator it;
+    SLAType_t sla = task_info.required_sla;
     unsigned required_memory = task_info.required_memory;
     float best_util = std::numeric_limits<float>::max();
-    float max_mips = 0;
 
-    for (MachineId_t mid = 0; mid < total_machines; mid++)
-            max_mips = max(max_mips, MachineMIPS(mid));
-    
     for (it = list.begin(); it != list.end(); it++)
     {
         MachineInfo_t curr_machine_info = Machine_GetInfo(*it);
@@ -78,7 +81,7 @@ static MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> l
         float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
         unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
         float curr_util = max(memory_util, cpu_util);
-        
+
         if (curr_machine_info.s_state != S0)
             continue;
 
@@ -90,9 +93,10 @@ static MachineId_t findLowestUtilization(TaskId_t task_id, vector<MachineId_t> l
         {
             continue;
         }
-        if (task_info.required_sla == SLA0 && MachineMIPS(*it) < max_mips * 0.8f)      
-          continue;
-
+        if (sla == SLA0 && MachineMIPS(*it) < 0.8 * max_mips && curr_util > 1.0)
+        {
+            continue;
+        }
         if (best_util > curr_util)
         {
             curr_machine = *it;
@@ -110,7 +114,19 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id)
     CPUType_t req_cpu = new_task_info.required_cpu;
     unsigned required_memory = new_task_info.required_memory;
     SLAType_t sla = new_task_info.required_sla;
-
+    Priority_t task_priority = LOW_PRIORITY;
+    if (sla == SLA0)
+    {
+        task_priority = HIGH_PRIORITY;
+    }
+    if (sla == SLA1)
+    {
+        task_priority = MID_PRIORITY;
+    }
+    if (sla == SLA2)
+    {
+        task_priority = LOW_PRIORITY;
+    }
     // Sorted
 
     vector<MachineId_t>::iterator it;
@@ -118,7 +134,7 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id)
     float best_cpu_util = std::numeric_limits<float>::max();
     MachineId_t best_cpu_machine = INVALID_MACHINE;
 
-    if (sleeping_machines.size() == total_machines)
+    if (sleeping_machines.size() > 0.5 * total_machines)
     {
         // Mass wake up to avoid no machines working
         std::set<MachineId_t>::iterator sl_it;
@@ -130,45 +146,55 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id)
         sleeping_machines.clear();
     }
     if (sla == SLA0)
-        curr_machine = findLowestUtilization(task_id, sorted_list);
-      
-    if (!curr_machine)
     {
-        for (it = sorted_list.begin(); it != sorted_list.end(); it++)
+        curr_machine = findLowestUtilization(task_id, machines);
+    }
+    if (curr_machine == INVALID_MACHINE)
+    {
+        float factor = 1.0;
+        while (curr_machine == INVALID_MACHINE && factor < 20)
         {
-            MachineInfo_t curr_machine_info = Machine_GetInfo(*it);
-            float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
-            // Approximate that the number of tasks correspond to number of active cpus active
-            // float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
-            // unsigned free_mem = machine_and_memory[*it];
-            unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
+            for (it = sorted_list.begin(); it != sorted_list.end(); it++)
+            {
+                MachineInfo_t curr_machine_info = Machine_GetInfo(*it);
+                float cpu_util = (float)curr_machine_info.active_tasks / (float)curr_machine_info.num_cpus;
+                // Approximate that the number of tasks correspond to number of active cpus active
+                // float memory_util = (float)curr_machine_info.memory_used / (float)curr_machine_info.memory_size;
+                // unsigned free_mem = machine_and_memory[*it];
+                unsigned free_mem = curr_machine_info.memory_size - curr_machine_info.memory_used;
 
-            if (curr_machine_info.s_state != S0)
-                continue;
+                if (curr_machine_info.s_state != S0)
+                    continue;
 
-            if (curr_machine_info.cpu != req_cpu)
-            {
-                continue;
-            }
-            if (free_mem < required_memory)
-            {
-                continue;
-            }
-            if (new_task_info.required_sla == SLA0 && cpu_util > 0.8)
-            {
-                continue;
-            }
-            if (new_task_info.required_sla == SLA1 && cpu_util > 0.9)
-            {
-                continue;
-            }
-            if (new_task_info.required_sla == SLA2 && cpu_util > 10)
-            {
-                continue;
-            }
+                if (curr_machine_info.cpu != req_cpu)
+                {
+                    continue;
+                }
+                if (free_mem < required_memory)
+                {
+                    continue;
+                }
 
-            curr_machine = *it;
-            break;
+                if (sla == SLA0 && cpu_util > 0.8 * factor)
+                {
+                    continue;
+                }
+                if (sla == SLA1 && cpu_util > 0.9 * factor)
+                {
+                    continue;
+                }
+                if (sla == SLA2 && cpu_util > 10 * factor)
+                {
+                    continue;
+                }
+                if (MachineMIPS(*it) < max_mips * (0.8 / factor) && sla == SLA0)
+                {
+                    continue;
+                }
+                curr_machine = *it;
+                break;
+            }
+            factor += 1;
         }
     }
 
@@ -188,7 +214,6 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id)
 
             if (curr_machine_info.s_state != S0)
                 continue;
-
             if (sleeping_machines.count(machine_id))
                 continue;
             if (curr_machine_info.cpu != req_cpu)
@@ -223,7 +248,7 @@ void pMapper::NewTask(Time_t now, TaskId_t task_id)
     VMId_t new_vm = VM_Create(new_task_info.required_vm, new_task_info.required_cpu);
     machine_and_vms[curr_machine].push_back(new_vm);
     VM_Attach(new_vm, curr_machine);
-    VM_AddTask(new_vm, task_id, new_task_info.priority);
+    VM_AddTask(new_vm, task_id, task_priority);
     tasks_and_vms[task_id] = new_vm;
 }
 
@@ -257,20 +282,8 @@ void pMapper::Shutdown(Time_t time)
 }
 void static RemoveTask(TaskId_t task_id, MachineId_t curr_machine)
 {
-    vector<TaskId_t> curr_tasks = machines_and_tasks[curr_machine];
-    int ind = -1;
-    for (int i = 0; i < curr_tasks.size(); i++)
-    {
-        if (curr_tasks[i] == task_id)
-        {
-            ind = i;
-        }
-    }
-    if (ind != -1)
-    {
-        machines_and_tasks[curr_machine].erase(machines_and_tasks[curr_machine].begin() + ind);
-    }
-    // tasks_and_vms[task_id] = NULL;
+    auto &tasklist = machines_and_tasks[curr_machine];
+    tasklist.erase(std::remove(tasklist.begin(), tasklist.end(), task_id), tasklist.end());
     tasks_and_vms.erase(task_id);
 }
 

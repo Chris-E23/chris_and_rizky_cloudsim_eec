@@ -18,6 +18,8 @@ long prev_count = 0;
 const MachineId_t INVALID_MACHINE = std::numeric_limits<MachineId_t>::max();
 const MachineId_t INVALID_TASK = std::numeric_limits<MachineId_t>::max();
 std::set<MachineId_t> sleeping_machines;
+static float max_mips = 0; 
+
 void MinMin::Init()
 {
     // Find the parameters of the clusters
@@ -36,15 +38,18 @@ void MinMin::Init()
     {
         machines.push_back(MachineId_t(i));
     }
-    for (unsigned i = 0; i < total_machines; i++)
-    {
-        MachineInfo_t curr_machine = Machine_GetInfo(i);
-        vms.push_back(VM_Create(LINUX, curr_machine.cpu));
-        VM_Attach(vms[i], machines[i]);
-        machine_and_vms[i].push_back(vms[i]);
-    }
+    // for (unsigned i = 0; i < total_machines; i++)
+    // {
+    //     MachineInfo_t curr_machine = Machine_GetInfo(i);
+    //     vms.push_back(VM_Create(LINUX, curr_machine.cpu));
+    //     VM_Attach(vms[i], machines[i]);
+    //     machine_and_vms[i].push_back(vms[i]);
+    // }
 
     // SimOutput("MinMin Scheduler::Init(): VM ids are " + to_string(vms[0]) + " and " + to_string(vms[1]), 3);
+    for(MachineId_t machine_id = 0; machine_id < total_machines; machine_id++){
+        max_mips = max(max_mips, (float)Machine_GetInfo(machine_id).performance[0]);
+    }
 }
 
 void MinMin::MigrationComplete(Time_t time, VMId_t vm_id)
@@ -73,10 +78,11 @@ void MinMin::NewTask(Time_t now, TaskId_t task_id)
     // Calculate the least amount of work with different configurations
     task_queue.push_back(task_id);
     TaskInfo_t task_info = GetTaskInfo(task_id);
-    //  if (task_info.required_sla == SLA0) {
-    //     ScheduleBatch();  // schedule immediately
-    //     return;
-    // }
+    if (task_info.required_sla == SLA0)
+    {
+        ScheduleBatch(); // schedule immediately
+        return;
+    }
     if (task_queue.size() < 20)
         return; // wait for a full batch
 
@@ -84,8 +90,7 @@ void MinMin::NewTask(Time_t now, TaskId_t task_id)
 }
 void MinMin::ScheduleBatch()
 {
-    if (task_queue.empty())
-        return;
+
     // Track memory reserved within this batch to avoid over-committing
     map<MachineId_t, unsigned> reserved_mem;
     // Track estimated load added within this batch
@@ -93,6 +98,17 @@ void MinMin::ScheduleBatch()
 
     map<TaskId_t, map<MachineId_t, float>> ect;
 
+    if (sleeping_machines.size() == total_machines)
+    {
+        // Mass wake up to avoid no machines working
+        std::set<MachineId_t>::iterator sl_it;
+
+        for (sl_it = sleeping_machines.begin(); sl_it != sleeping_machines.end(); sl_it++)
+        {
+            Machine_SetState(*sl_it, S0);
+        }
+        sleeping_machines.clear();
+    }
     for (TaskId_t taskid : task_queue)
     {
         float factor = 1.0;
@@ -103,12 +119,16 @@ void MinMin::ScheduleBatch()
             {
                 MachineInfo_t mi = Machine_GetInfo(machineid);
                 float cpu_util = (float)mi.active_tasks / float(mi.num_cpus);
-                if (mi.s_state != S0)
+
+                if (mi.s_state != S0 || sleeping_machines.count(machineid))
                     continue;
                 if (mi.cpu != ti.required_cpu)
                     continue;
                 if (mi.memory_size - mi.memory_used < ti.required_memory)
                     continue;
+                if (ti.required_sla == SLA0 && mi.performance[0] < max_mips * 0.8f)
+                    continue; // SLA0 never goes to slow machines
+
                 if (ti.required_sla == SLA0 && cpu_util > 2 * factor)
                     continue;
                 if (ti.required_sla == SLA1 && cpu_util > 4 * factor)
@@ -216,7 +236,10 @@ void MinMin::ScheduleBatch()
             {
                 MachineInfo_t mi = Machine_GetInfo(machine);
                 float base = (float)GetTaskInfo(tid).remaining_instructions / mi.performance[0];
-                ms[machine] = base + reserved_time[machine];
+                float cpu_util = (float)mi.active_tasks / (float)mi.num_cpus;
+                float load_penalty = max(1.0f, cpu_util);
+
+                ms[machine] = base * load_penalty + reserved_time[machine];
             }
         }
     }
@@ -273,5 +296,13 @@ void MinMin::TaskComplete(Time_t now, TaskId_t task_id)
     tasklist.erase(std::remove(tasklist.begin(), tasklist.end(), task_id),
                    tasklist.end());
 
-    // Check no VMs on this machine are still active
+    // for (MachineId_t i = 0; i < total_machines; i++)
+    // {
+    //     MachineInfo_t info = Machine_GetInfo(i);
+    //     if (info.active_tasks == 0 && info.s_state == S0 && machine_and_vms[i].empty())
+    //     {
+    //         Machine_SetState(i, S5);
+    //         sleeping_machines.insert(i);
+    //     }
+    // }
 }
