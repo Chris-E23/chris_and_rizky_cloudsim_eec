@@ -137,6 +137,7 @@ void RoundRobin::NewTask(Time_t now, TaskId_t task_id)
             if (info.memory_size - info.memory_used < required_memory)
                 continue;
             curr_machine = mid;
+            break;
         }
     }
 
