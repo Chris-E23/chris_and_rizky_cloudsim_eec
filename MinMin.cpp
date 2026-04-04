@@ -83,7 +83,7 @@ void MinMin::NewTask(Time_t now, TaskId_t task_id)
         ScheduleBatch(); // schedule immediately
         return;
     }
-    if (task_queue.size() < 20)
+    if (task_queue.size() < 10)
         return; // wait for a full batch
 
     ScheduleBatch();
