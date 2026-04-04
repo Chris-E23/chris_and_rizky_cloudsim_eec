@@ -1,7 +1,6 @@
 #include "Scheduler.hpp"
 #include <map>
 #include <limits>
-static bool migrating = false;
 static unsigned total_machines = 16;
 static map<MachineId_t, vector<VMId_t>> machine_and_vms;
 static map<TaskId_t, VMId_t> tasks_and_vms;
@@ -60,7 +59,6 @@ void GreedyScheduler::NewTask(Time_t now, TaskId_t task_id)
     bool GPUCapable = IsTaskGPUCapable(task_id);
 
     TaskInfo_t new_task_info = GetTaskInfo(task_id);
-    SLAType_t curr_sla = new_task_info.required_sla;
     CPUType_t req_cpu = new_task_info.required_cpu;
     unsigned required_memory = new_task_info.required_memory;
 
@@ -68,7 +66,6 @@ void GreedyScheduler::NewTask(Time_t now, TaskId_t task_id)
 
     MachineId_t best_machine = INVALID_MACHINE;
     float best_cpu_util = std::numeric_limits<float>::max();
-    MachineId_t best_cpu_machine = INVALID_MACHINE;
 
     for (MachineId_t machine_id = 0; machine_id < total_machines; machine_id++)
     {
